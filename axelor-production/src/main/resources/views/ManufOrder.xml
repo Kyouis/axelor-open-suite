@@ -165,7 +165,7 @@
           widget="NavSelect"/>
         <field name="billOfMaterial" required="true" readonlyIf="statusSelect &gt; 1"
           onChange="action-manuf-order-group-onchange"
-          domain="self.defineSubBillOfMaterial = true AND self.statusSelect = 3 AND ((:workshopStockLocation IS NULL AND self.workshopStockLocation IS NULL) OR self.workshopStockLocation = :workshopStockLocation) AND self.typeSelect = 1"
+          domain="self.defineSubBillOfMaterial = true AND self.statusSelect = 3 AND (self.workshopStockLocation IS NULL OR self.workshopStockLocation = :workshopStockLocation) AND self.typeSelect = 1"
           grid-view="bill-of-material-grid" form-view="bill-of-material-form" colSpan="3"
           canEdit="false" edit-window="blank"/>
         <field name="prodProcess" onChange="action-manuf-order-group-prod-process-onchange"

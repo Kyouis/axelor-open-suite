@@ -30,10 +30,12 @@ import com.axelor.apps.production.db.ProdProcessLine;
 import com.axelor.apps.production.db.ProdProduct;
 import com.axelor.apps.production.db.WorkCenter;
 import com.axelor.apps.production.db.repo.OperationOrderRepository;
+import com.axelor.apps.production.db.repo.WorkCenterRepository;
 import com.axelor.apps.production.exceptions.ProductionExceptionMessage;
 import com.axelor.apps.production.service.app.AppProductionService;
 import com.axelor.apps.production.service.manuforder.ManufOrderService;
 import com.axelor.apps.production.service.manuforder.ManufOrderStockMoveService;
+import com.axelor.apps.stock.db.StockLocation;
 import com.axelor.apps.stock.db.StockMove;
 import com.axelor.apps.stock.db.StockMoveLine;
 import com.axelor.apps.stock.db.repo.StockMoveRepository;
@@ -43,6 +45,7 @@ import com.axelor.exception.db.repo.TraceBackRepository;
 import com.axelor.i18n.I18n;
 import com.axelor.inject.Beans;
 import com.axelor.meta.db.MetaFile;
+import com.google.common.collect.Lists;
 import com.google.inject.Inject;
 import com.google.inject.persist.Transactional;
 import java.lang.invoke.MethodHandles;
@@ -58,6 +61,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,6 +70,8 @@ public class OperationOrderServiceImpl implements OperationOrderService {
   @Inject protected BarcodeGeneratorService barcodeGeneratorService;
 
   @Inject protected AppProductionService appProductionService;
+
+  @Inject protected WorkCenterRepository workCenterRepo;
 
   private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
   private static final DateTimeFormatter DATE_TIME_FORMAT =
@@ -85,16 +91,47 @@ public class OperationOrderServiceImpl implements OperationOrderService {
               : "null",
           prodProcessLine.getName());
     }
+    WorkCenter workCenter = getWorkCenterFromWorkShop(prodProcessLine, manufOrder);
     OperationOrder operationOrder =
         this.createOperationOrder(
             manufOrder,
             prodProcessLine.getPriority(),
-            prodProcessLine.getWorkCenter(),
-            prodProcessLine.getWorkCenter().getMachine(),
+            workCenter,
+            workCenter.getMachine(),
             prodProcessLine.getMachineTool(),
             prodProcessLine);
 
     return Beans.get(OperationOrderRepository.class).save(operationOrder);
+  }
+
+  protected List<WorkCenter> getWorkCentersFromWorkShop(ManufOrder manufOrder) {
+    List<WorkCenter> workCenters = Lists.newArrayList();
+    StockLocation workShop = manufOrder.getWorkshopStockLocation();
+    List<WorkCenter> workCenterList =
+        workCenterRepo.all().filter("self.machine.workshopStockLocation = ?1", workShop).fetch();
+    for (WorkCenter workCenter : workCenterList) {
+      if (workCenter.getMachine().getParameterSet().containsAll(workShop.getParameterSet())) {
+        workCenters.add(workCenter);
+      }
+    }
+    return workCenters;
+  }
+
+  protected WorkCenter getWorkCenterFromWorkShop(
+      ProdProcessLine prodProcessLine, ManufOrder manufOrder) {
+    WorkCenter defaultWorkCenter = prodProcessLine.getWorkCenter();
+    StockLocation workShop = manufOrder.getWorkshopStockLocation();
+    if (workShop == null) {
+      return defaultWorkCenter;
+    }
+    List<WorkCenter> workCenterList =
+        workCenterRepo.all().filter("self.machine.workshopStockLocation = ?1", workShop).fetch();
+    for (WorkCenter workCenter : workCenterList) {
+      if (workCenter.getMachine().getParameterSet().containsAll(workShop.getParameterSet())) {
+        return workCenter;
+      }
+    }
+    return defaultWorkCenter;
   }
 
   @Transactional
@@ -511,6 +548,34 @@ public class OperationOrderServiceImpl implements OperationOrderService {
               addPadding);
       if (barcodeFile != null) {
         operationOrder.setBarCode(barcodeFile);
+      }
+    }
+  }
+
+  @Override
+  public List<Long> setWorkCenterDomain(OperationOrder operationOrder) {
+    List<Long> ids = Lists.newArrayList(0L);
+    if (operationOrder.getManufOrder() == null) {
+      return ids;
+    }
+    List<WorkCenter> workCenters = getWorkCentersFromWorkShop(operationOrder.getManufOrder());
+    for (WorkCenter workCenter : workCenters) {
+      ids.add(workCenter.getId());
+    }
+    return ids;
+  }
+
+  @Override
+  public void updateOperations(ManufOrder manufOrder) {
+    if (CollectionUtils.isEmpty(manufOrder.getOperationOrderList())) {
+      return;
+    }
+    for (OperationOrder operationOrder : manufOrder.getOperationOrderList()) {
+      if (CollectionUtils.isEmpty(operationOrder.getProdHumanResourceList())) {
+        continue;
+      }
+      for (ProdHumanResource prodHumanResource : operationOrder.getProdHumanResourceList()) {
+        prodHumanResource.setDuration(operationOrder.getPlannedDuration());
       }
     }
   }
